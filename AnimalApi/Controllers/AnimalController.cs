@@ -44,7 +44,7 @@ public class AnimalController : Controller
             return BadRequest("Animal data is missing");
         }
 
-        Animal editedAnimal = _animalDataBase.EditAnimal(id, animal);
+        Animal? editedAnimal = _animalDataBase.EditAnimal(id, animal);
         if (editedAnimal == null)
         {
             return NotFound($"Animal with ID {id} not found");

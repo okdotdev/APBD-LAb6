@@ -1,4 +1,5 @@
-﻿using AnimalApi.Models;
+﻿using System.Data;
+using AnimalApi.Models;
 using AnimalApi.Models.DTOs;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
@@ -6,162 +7,125 @@ using Microsoft.Data.SqlClient;
 
 namespace AnimalApi.DataBase;
 
-public class AnimalDataBase : IAnimalDataBase
-{
-    private readonly IConfiguration _configuration;
-
-    public AnimalDataBase(IConfiguration configuration)
+ public class AnimalDataBase : IAnimalDataBase
     {
-        _configuration = configuration;
-    }
+        private readonly IConfiguration _configuration;
 
-    public IEnumerable<Animal> GetAnimals()
-    {
-        using SqlConnection connection = new(_configuration.GetConnectionString("Default"));
-        connection.Open();
-        using SqlCommand command = new();
-        command.Connection = connection;
-        command.CommandText = "SELECT * FROM Animal;";
-        SqlDataReader? reader = command.ExecuteReader();
-
-        List<Animal> animals = new();
-        int idAnimalOrdinal = reader.GetOrdinal("IdAnimal");
-        int nameOrdinal = reader.GetOrdinal("Name");
-        int descriptionOrdinal = reader.GetOrdinal("Description");
-        int categoryOrdinal = reader.GetOrdinal("Category");
-        int areaOrdinal = reader.GetOrdinal("Area");
-        while (reader.Read())
+        public AnimalDataBase(IConfiguration configuration)
         {
-            animals.Add(new Animal()
+            _configuration = configuration;
+        }
+
+        private SqlConnection GetOpenConnection()
+        {
+            SqlConnection connection = new(_configuration.GetConnectionString("Default"));
+            connection.Open();
+            return connection;
+        }
+
+        public IEnumerable<Animal> GetAnimals()
+        {
+            using SqlConnection connection = GetOpenConnection();
+            using SqlCommand? command = connection.CreateCommand();
+            command.CommandText = "SELECT * FROM Animal;";
+
+            using SqlDataReader? reader = command.ExecuteReader();
+            List<Animal> animals = new(capacity: 10);
+
+            while (reader.Read())
             {
-                IdAnimal = reader.GetInt32(idAnimalOrdinal),
-                Name = reader.GetString(nameOrdinal),
-                Description = reader.GetString(descriptionOrdinal),
-                Category = reader.GetString(categoryOrdinal),
-                Area = reader.GetString(areaOrdinal)
-            });
+                animals.Add(MapToAnimal(reader));
+            }
+
+            return animals;
         }
 
-        return animals;
-    }
-
-    public IEnumerable<Animal> GetAllAnimalsOrderBy(string orderBy = "name")
-    {
-        using SqlConnection connection = new SqlConnection(_configuration.GetConnectionString("Default"));
-        connection.Open();
-        using SqlCommand command = new SqlCommand();
-        command.Connection = connection;
-
-        string orderByColumn = "name";
-        orderBy = orderBy.ToLower();
-        if (orderBy.Equals("name") || orderBy.Equals("description") || orderBy.Equals("category") ||
-            orderBy.Equals("area"))
+        public IEnumerable<Animal> GetAllAnimalsOrderBy(string orderBy = "name")
         {
-            orderByColumn = orderBy.ToLower();
-        }
+            using SqlConnection connection = GetOpenConnection();
+            using SqlCommand? command = connection.CreateCommand();
 
-        command.CommandText = $"SELECT * FROM Animal ORDER BY {orderByColumn};";
-        var reader = command.ExecuteReader();
-
-        var animals = new List<Animal>();
-        int idAnimalOrdinal = reader.GetOrdinal("IdAnimal");
-        int nameOrdinal = reader.GetOrdinal("Name");
-        int descriptionOrdinal = reader.GetOrdinal("Description");
-        int categoryOrdinal = reader.GetOrdinal("Category");
-        int areaOrdinal = reader.GetOrdinal("Area");
-
-        while (reader.Read())
-        {
-            animals.Add(new Animal()
+            string orderByColumn = orderBy.ToLower();
+            if (orderByColumn != "name" && orderByColumn != "description" && orderByColumn != "category" &&
+                orderByColumn != "area")
             {
-                IdAnimal = reader.GetInt32(idAnimalOrdinal),
-                Name = reader.GetString(nameOrdinal),
-                Description = reader.GetString(descriptionOrdinal),
-                Category = reader.GetString(categoryOrdinal),
-                Area = reader.GetString(areaOrdinal)
-            });
+                orderByColumn = "name";
+            }
+
+            command.CommandText = $"SELECT * FROM Animal ORDER BY {orderByColumn};";
+
+            using SqlDataReader? reader = command.ExecuteReader();
+            List<Animal> animals = new List<Animal>(capacity: 10);
+
+            while (reader.Read())
+            {
+                animals.Add(MapToAnimal(reader));
+            }
+
+            return animals;
         }
 
-        return animals;
-    }
-
-    public void AddAnimal(AddAnimal? animal)
-    {
-        using SqlConnection connection = new SqlConnection(_configuration.GetConnectionString("Default"));
-        connection.Open();
-
-        using SqlCommand command = new SqlCommand();
-        command.Connection = connection;
-        command.CommandText =
-            "INSERT INTO Animal VALUES(@animalName, @animalDescription, @animalCategory, @animalArea)";
-        command.Parameters.AddWithValue("@animalName", animal.Name);
-        command.Parameters.AddWithValue("@animalDescription", animal.Description);
-        command.Parameters.AddWithValue("@animalCategory", animal.Category);
-        command.Parameters.AddWithValue("@animalArea", animal.Area);
-        command.ExecuteNonQuery();
-    }
-
-    public bool DeleteAnimal(int id)
-    {
-        using SqlConnection connection = new SqlConnection(_configuration.GetConnectionString("Default"));
-        connection.Open();
-
-        using SqlCommand command = new SqlCommand();
-        command.Connection = connection;
-        command.CommandText = "DELETE FROM Animal WHERE IdAnimal=@id";
-        command.Parameters.AddWithValue("@id", id);
-
-        command.ExecuteNonQuery();
-
-        return true;
-    }
-
-    public Animal EditAnimal(int id, [FromBody] Animal? animal)
-    {
-        using SqlConnection connection = new SqlConnection(_configuration.GetConnectionString("Default"));
-        connection.Open();
-
-        using SqlCommand command = new SqlCommand();
-        command.Connection = connection;
-        command.CommandText =
-            "UPDATE Animal SET Name=@name,Description=@description,Category=@category,Area=@area WHERE IdAnimal=@id";
-
-        command.Parameters.AddWithValue("@name", animal.Name);
-        command.Parameters.AddWithValue("@description", animal.Description);
-        command.Parameters.AddWithValue("@category", animal.Category);
-        command.Parameters.AddWithValue("@area", animal.Area);
-
-        command.ExecuteNonQuery();
-
-        Animal updatedAnimal = GetAnimalById(id);
-        return updatedAnimal;
-    }
-
-    private Animal GetAnimalById(int id)
-    {
-        using SqlConnection connection = new SqlConnection(_configuration.GetConnectionString("Default"));
-        connection.Open();
-        using SqlCommand command = new SqlCommand();
-        command.Connection = connection;
-        command.CommandText = "SELECT * FROM Animal WHERE IdAnimal = @id";
-        command.Parameters.AddWithValue("@id", id);
-
-        SqlDataReader? reader = command.ExecuteReader();
-        if (!reader.Read()) return null;
-        int idAnimalOrdinal = reader.GetOrdinal("IdAnimal");
-        int nameOrdinal = reader.GetOrdinal("Name");
-        int descriptionOrdinal = reader.GetOrdinal("Description");
-        int categoryOrdinal = reader.GetOrdinal("Category");
-        int areaOrdinal = reader.GetOrdinal("Area");
-
-        return new Animal()
+        public void AddAnimal(AddAnimal animal)
         {
-            IdAnimal = reader.GetInt32(idAnimalOrdinal),
-            Name = reader.GetString(nameOrdinal),
-            Description = reader.GetString(descriptionOrdinal),
-            Category = reader.GetString(categoryOrdinal),
-            Area = reader.GetString(areaOrdinal)
-        };
+            using SqlConnection connection = GetOpenConnection();
+            using SqlCommand? command = connection.CreateCommand();
+            command.CommandText =
+                "INSERT INTO Animal (Name, Description, Category, Area) VALUES (@Name, @Description, @Category, @Area)";
+            command.Parameters.AddWithValue("@Name", animal.Name);
+            command.Parameters.AddWithValue("@Description", (object)animal.Description ?? DBNull.Value);
+            command.Parameters.AddWithValue("@Category", (object)animal.Category);
+            command.Parameters.AddWithValue("@Area", (object)animal.Area);
+            command.ExecuteNonQuery();
+        }
 
+        public bool DeleteAnimal(int id)
+        {
+            using SqlConnection connection = GetOpenConnection();
+            using SqlCommand? command = connection.CreateCommand();
+            command.CommandText = "DELETE FROM Animal WHERE IdAnimal = @Id";
+            command.Parameters.AddWithValue("@Id", id);
+            return command.ExecuteNonQuery() > 0;
+        }
+
+        public Animal? EditAnimal(int id, [FromBody] Animal animal)
+        {
+            using SqlConnection connection = GetOpenConnection();
+            using SqlCommand? command = connection.CreateCommand();
+            command.CommandText =
+                "UPDATE Animal SET Name = @Name, Description = @Description, Category = @Category, Area = @Area WHERE IdAnimal = @Id";
+
+            command.Parameters.AddWithValue("@Id", id);
+            command.Parameters.AddWithValue("@Name", animal.Name);
+            command.Parameters.AddWithValue("@Description", (object)animal.Description ?? DBNull.Value);
+            command.Parameters.AddWithValue("@Category", (object)animal.Category ?? DBNull.Value);
+            command.Parameters.AddWithValue("@Area", (object)animal.Area ?? DBNull.Value);
+
+            command.ExecuteNonQuery();
+
+            return GetAnimalById(id);
+        }
+
+        private Animal? GetAnimalById(int id)
+        {
+            using SqlConnection connection = GetOpenConnection();
+            using SqlCommand? command = connection.CreateCommand();
+            command.CommandText = "SELECT * FROM Animal WHERE IdAnimal = @Id";
+            command.Parameters.AddWithValue("@Id", id);
+
+            using SqlDataReader? reader = command.ExecuteReader();
+            return reader.Read() ? MapToAnimal(reader) : null;
+        }
+
+        private Animal MapToAnimal(IDataRecord dataRecord)
+        {
+            if (dataRecord == null) throw new ArgumentNullException(nameof(dataRecord));
+            return new Animal
+            {
+                IdAnimal = dataRecord.GetInt32(dataRecord.GetOrdinal("IdAnimal")),
+                Name = dataRecord.GetString(dataRecord.GetOrdinal("Name")),
+                Description = dataRecord.IsDBNull(dataRecord.GetOrdinal("Description")) ? null : dataRecord.GetString(dataRecord.GetOrdinal("Description")),
+                Category = dataRecord.IsDBNull(dataRecord.GetOrdinal("Category")) ? null : dataRecord.GetString(dataRecord.GetOrdinal("Category")),
+                Area = dataRecord.IsDBNull(dataRecord.GetOrdinal("Area")) ? null : dataRecord.GetString(dataRecord.GetOrdinal("Area"))
+            };
+        }
     }
-}
